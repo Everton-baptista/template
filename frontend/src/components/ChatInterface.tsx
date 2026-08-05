@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { API_BASE_URL } from "@/lib/api";
-import { Send, Bot, User, Loader2, Zap } from "lucide-react";
+import { Send, Bot, User, Loader2, Zap, Trash2, Sparkles, Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
@@ -18,6 +18,13 @@ interface ChatInterfaceProps {
   protocol: "sse" | "websocket" | "rest";
 }
 
+const QUICK_PROMPTS = [
+  "🔍 Pesquise tendências de IA para 2026",
+  "📊 Analise dados financeiros de empresas de tech",
+  "💻 Crie uma API REST em Python com FastAPI",
+  "📝 Redija um resumo executivo sobre inovação",
+];
+
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   selectedAgentId,
   protocol,
@@ -26,13 +33,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     {
       id: "welcome",
       sender: "assistant",
-      content: "Olá! Sou o ambiente de orquestração do **Agno**. Escolha um agente ou equipe acima e envie sua solicitação.",
+      content: "Olá! Bem-vindo ao **Agno Multi-Agent Studio**. Selecione um agente ou equipe acima e envie sua solicitação abaixo.",
       agentId: selectedAgentId,
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -41,21 +49,39 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, loading]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+  const clearChat = () => {
+    setMessages([
+      {
+        id: "welcome-" + Date.now(),
+        sender: "assistant",
+        content: `Chat reiniciado para o agente **${selectedAgentId}**. Como posso ajudar?`,
+        agentId: selectedAgentId,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleSend = async (textToSend?: string) => {
+    const messageText = (textToSend || input).trim();
+    if (!messageText || loading) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
       sender: "user",
-      content: input,
-      timestamp: new Date().toLocaleTimeString(),
+      content: messageText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    const currentInput = input;
-    setInput("");
+    if (!textToSend) setInput("");
     setLoading(true);
 
     const assistantMsgId = (Date.now() + 1).toString();
@@ -64,7 +90,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       sender: "assistant",
       content: "",
       agentId: selectedAgentId,
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, assistantMsg]);
@@ -74,10 +100,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         const response = await fetch(`${API_BASE_URL}/api/v1/agent/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: currentInput, agent_id: selectedAgentId }),
+          body: JSON.stringify({ message: messageText, agent_id: selectedAgentId }),
         });
 
-        if (!response.body) throw new Error("Sem corpo de resposta");
+        if (!response.body) throw new Error("Sem resposta do servidor");
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -89,7 +115,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           const chunk = decoder.decode(value);
           const lines = chunk.split("\n");
           for (const line of lines) {
-            if (line.startswith?.("data: ")) {
+            if (line.startsWith("data: ")) {
               try {
                 const data = JSON.parse(line.replace("data: ", ""));
                 if (data.delta) {
@@ -100,9 +126,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         : m
                     )
                   );
+                } else if (data.error) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMsgId
+                        ? { ...m, content: `⚠️ Erro: ${data.error}` }
+                        : m
+                    )
+                  );
                 }
               } catch (e) {
-                // Parse pontual ignorado
+                // Parse ignorado para partes incompletas
               }
             }
           }
@@ -116,7 +150,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             JSON.stringify({
               action: "send_message",
               agent_id: selectedAgentId,
-              message: currentInput,
+              message: messageText,
             })
           );
         };
@@ -132,6 +166,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               )
             );
           } else if (data.event === "done" || data.event === "error") {
+            if (data.message) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId ? { ...m, content: `⚠️ Erro: ${data.message}` } : m
+                )
+              );
+            }
             socket.close();
             setLoading(false);
           }
@@ -140,19 +181,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         socket.onerror = (error) => {
           console.error("Erro WebSocket:", error);
           socket.close();
+          setLoading(false);
         };
       } else {
         // REST Standard
         const res = await fetch(`${API_BASE_URL}/api/v1/agent/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: currentInput, agent_id: selectedAgentId }),
+          body: JSON.stringify({ message: messageText, agent_id: selectedAgentId }),
         });
 
         const data = await res.json();
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantMsgId ? { ...m, content: data.content || "Sem resposta." } : m
+            m.id === assistantMsgId ? { ...m, content: data.content || "Sem resposta retornada." } : m
           )
         );
       }
@@ -160,7 +202,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
-            ? { ...m, content: `⚠️ Erro de comunicação: ${err.message || err}` }
+            ? { ...m, content: `⚠️ Erro de Comunicação: ${err.message || err}` }
             : m
         )
       );
@@ -170,16 +212,30 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="glass-panel flex-1 flex flex-col rounded-xl overflow-hidden h-[600px]">
-      {/* Header do Chat */}
-      <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/60">
-        <div className="flex items-center gap-2">
-          <Zap className="w-5 h-5 text-indigo-400" />
-          <span className="font-semibold text-gray-200">Terminal Agno Multi-Agent</span>
+    <div className="glass-card flex-1 flex flex-col rounded-2xl overflow-hidden min-h-[550px] h-[620px]">
+      {/* Header do Chat Clean */}
+      <div className="px-6 py-3.5 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/80 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
+            <Bot className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="font-semibold text-sm text-slate-100 block">
+              Sessão Ativa: <span className="text-indigo-400 capitalize">{selectedAgentId}</span>
+            </span>
+            <span className="text-[11px] text-slate-400 font-mono">
+              Modo: {protocol.toUpperCase()}
+            </span>
+          </div>
         </div>
-        <span className="text-xs font-mono px-2 py-1 bg-indigo-950 text-indigo-300 border border-indigo-800 rounded">
-          Protocolo: {protocol.toUpperCase()}
-        </span>
+
+        <button
+          onClick={clearChat}
+          title="Limpar histórico"
+          className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 rounded-xl transition-all"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Lista de Mensagens */}
@@ -192,31 +248,44 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }`}
           >
             {msg.sender === "assistant" && (
-              <div className="w-8 h-8 rounded-lg bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center shrink-0 text-indigo-300">
-                <Bot className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0 text-indigo-400">
+                <Bot className="w-4 h-4" />
               </div>
             )}
             <div
-              className={`max-w-[80%] rounded-xl p-4 text-sm leading-relaxed ${
+              className={`relative group max-w-[82%] rounded-2xl p-4 text-sm leading-relaxed ${
                 msg.sender === "user"
-                  ? "bg-indigo-600 text-white rounded-tr-none shadow-md"
-                  : "bg-gray-800/80 border border-gray-700/60 text-gray-100 rounded-tl-none"
+                  ? "bg-indigo-600 text-white rounded-tr-none shadow-md shadow-indigo-600/10"
+                  : "bg-slate-900/70 border border-slate-800/80 text-slate-200 rounded-tl-none shadow-sm"
               }`}
             >
               {msg.sender === "assistant" ? (
-                <div className="prose prose-invert max-w-none text-sm">
-                  <ReactMarkdown>{msg.content || "Pensando..."}</ReactMarkdown>
+                <div className="prose prose-invert max-w-none text-sm leading-relaxed">
+                  <ReactMarkdown>{msg.content || "Processando resposta..."}</ReactMarkdown>
                 </div>
               ) : (
-                <p>{msg.content}</p>
+                <p className="whitespace-pre-wrap">{msg.content}</p>
               )}
-              <span className="block text-[10px] text-gray-400 mt-2 text-right">
-                {msg.timestamp}
-              </span>
+
+              <div className="flex items-center justify-between gap-4 mt-2.5 pt-2 border-t border-slate-800/40 text-[10px] text-slate-400">
+                <span>{msg.timestamp}</span>
+                {msg.sender === "assistant" && msg.content && (
+                  <button
+                    onClick={() => copyToClipboard(msg.content, msg.id)}
+                    className="hover:text-slate-200 transition-colors flex items-center gap-1"
+                  >
+                    {copiedId === msg.id ? (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
             {msg.sender === "user" && (
-              <div className="w-8 h-8 rounded-lg bg-purple-600/30 border border-purple-500/50 flex items-center justify-center shrink-0 text-purple-300">
-                <User className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-slate-300">
+                <User className="w-4 h-4" />
               </div>
             )}
           </div>
@@ -224,30 +293,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Caixa de Entrada */}
-      <div className="p-4 border-t border-gray-800 bg-gray-900/60 flex gap-3">
+      {/* Quick Prompts se houver apenas mensagem inicial */}
+      {messages.length <= 1 && (
+        <div className="px-6 py-2 flex flex-wrap gap-2">
+          {QUICK_PROMPTS.map((promptText, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSend(promptText)}
+              className="text-xs bg-slate-900/80 hover:bg-indigo-950/60 border border-slate-800 hover:border-indigo-500/50 text-slate-300 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3 h-3 text-indigo-400" />
+              {promptText}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Caixa de Entrada Clean */}
+      <div className="p-4 border-t border-slate-800/80 bg-slate-900/80 backdrop-blur-md flex gap-3 items-center">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder={`Pergunte algo para o agente (${selectedAgentId})...`}
-          className="flex-1 bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors"
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+          placeholder={`Digite sua mensagem para ${selectedAgentId}...`}
+          className="flex-1 bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/80 transition-colors"
           disabled={loading}
         />
         <button
-          onClick={sendMessage}
+          onClick={() => handleSend()}
           disabled={loading || !input.trim()}
-          className="glass-button px-5 py-2.5 rounded-lg text-white font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="glass-button px-5 py-3 rounded-xl text-white font-medium flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
         >
           {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
           ) : (
             <Send className="w-4 h-4" />
           )}
-          <span>Enviar</span>
+          <span className="hidden sm:inline">Enviar</span>
         </button>
       </div>
     </div>
   );
 };
+
