@@ -1,0 +1,11 @@
+# Cursor Rules for Agno Multi-Agent Template
+
+You are working on a production-grade Agno Multi-Agent Template.
+
+Rules:
+1. Always follow the layer structure in `backend/app/` (agents, teams, workflows, tools, storage, api).
+2. For Agno 2.x, use `from agno.agent import Agent` and `from agno.team import Team` with `members=[...]`.
+3. Storage in Agno 2.x uses `from agno.db.postgres import PostgresDb` and `from agno.db.sqlite import SqliteDb` with `session_table=...`.
+4. Maintain FastAPI endpoints supporting REST JSON, SSE streaming (`EventSourceResponse`), and WebSockets (`/ws/chat`).
+5. Ensure Next.js frontend components in `frontend/src/components/` remain typed with TypeScript and styled with Tailwind CSS.
+6. Run tests using `PYTHONPATH=. pytest tests/ -v` inside `backend/` before declaring success.

@@ -1,0 +1,5 @@
+# Cline & Windsurf Rules for Agno Multi-Agent Template
+
+- Follow clean architecture boundaries in `backend/app/` and `frontend/src/`.
+- Use Agno 2.x imports: `agno.agent.Agent`, `agno.team.Team`, `agno.db.postgres.PostgresDb`, `agno.db.sqlite.SqliteDb`.
+- Never bypass tests; verify edits with `cd backend && PYTHONPATH=. pytest tests/ -v`.

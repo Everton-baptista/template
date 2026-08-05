@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agno-template-backend"
+version = "0.1.0"
+description = "Template de Produção para Agentes e Multiagentes com o Framework Agno"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "agno>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.28.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "openai>=1.14.0",
+    "sqlalchemy>=2.0.28",
+    "psycopg2-binary>=2.9.9",
+    "pgvector>=0.2.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I"]
